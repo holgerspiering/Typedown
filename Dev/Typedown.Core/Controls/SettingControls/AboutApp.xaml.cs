@@ -25,11 +25,6 @@ namespace Typedown.Core.Controls
             }
         }
 
-        private async void FeedBackButton_Click(object sender, Windows.UI.Xaml.RoutedEventArgs e)
-        {
-            await FeedbackDialog.OpenFeedbackDialog(XamlRoot);
-        }
-
         private void OnUnloaded(object sender, RoutedEventArgs e)
         {
             Bindings?.StopTracking();
