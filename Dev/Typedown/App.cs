@@ -14,7 +14,10 @@ namespace Typedown
 {
     public class App : XamlApplication
     {
-        private static readonly Mutex mutex = new(true, "Typedown.App.Mutex");
+        // Distinct from the Store version's names so both can run side by side
+        private const string InstanceName = "TypedownFork.App";
+
+        private static readonly Mutex mutex = new(true, $"{InstanceName}.Mutex");
 
         private App(IEnumerable<IXamlMetadataProvider> providers) : base(providers) { }
 
@@ -64,7 +67,7 @@ namespace Typedown
             {
                 try
                 {
-                    using var server = new NamedPipeServerStream("Typedown.App.PiPe", PipeDirection.InOut);
+                    using var server = new NamedPipeServerStream($"{InstanceName}.Pipe",PipeDirection.InOut);
                     await server.WaitForConnectionAsync();
                     using var reader = new StreamReader(server);
                     using var writer = new StreamWriter(server);
@@ -84,7 +87,7 @@ namespace Typedown
         {
             try
             {
-                using var client = new NamedPipeClientStream(".", "Typedown.App.PiPe", PipeDirection.InOut);
+                using var client = new NamedPipeClientStream(".", $"{InstanceName}.Pipe",PipeDirection.InOut);
                 client.Connect();
                 using var reader = new StreamReader(client);
                 using var writer = new StreamWriter(client);
