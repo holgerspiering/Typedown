@@ -37,22 +37,31 @@ namespace Typedown.Core
 
         public static string GetLocalFolderPath()
         {
+            if (IsPortable)
+                return EnsureDirectory(Path.Combine(AppContext.BaseDirectory, "Data"));
             try
             {
                 return ApplicationData.Current.LocalFolder.Path;
             }
             catch (Exception)
             {
-                var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), AppName);
-                if (!Directory.Exists(path))
-                    Directory.CreateDirectory(path);
-                return path;
+                return EnsureDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), AppName));
             }
+        }
+
+        private static string EnsureDirectory(string path)
+        {
+            if (!Directory.Exists(path))
+                Directory.CreateDirectory(path);
+            return path;
         }
 
         public static string AppName => "Typedown";
 
         public static bool IsPackaged { get; private set; }
+
+        // Unpackaged builds with a "portable" marker file next to the executable keep all data in the program folder
+        public static bool IsPortable { get; private set; }
 
         static Config()
         {
@@ -64,6 +73,7 @@ namespace Typedown.Core
             {
                 IsPackaged = false;
             }
+            IsPortable = !IsPackaged && File.Exists(Path.Combine(AppContext.BaseDirectory, "portable"));
         }
     }
 }

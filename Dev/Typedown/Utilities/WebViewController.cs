@@ -1,6 +1,7 @@
 ﻿using Microsoft.Web.WebView2.Core;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
@@ -92,7 +93,8 @@ namespace Typedown.Utilities
                 commandLineArgs.Add("--remote-debugging-port=9222");
 #endif
                 var options = new CoreWebView2EnvironmentOptions(string.Join(" ", commandLineArgs));
-                coreWebView2EnvironmentTask = CoreWebView2Environment.CreateAsync(null, null, options);
+                var userDataFolder = Core.Config.IsPortable ? Path.Combine(Core.Config.GetLocalFolderPath(), "WebView2") : null;
+                coreWebView2EnvironmentTask = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
                 var environment = await coreWebView2EnvironmentTask;
                 environment.BrowserProcessExited += OnEnvironmentBrowserProcessExited;
                 return environment;
