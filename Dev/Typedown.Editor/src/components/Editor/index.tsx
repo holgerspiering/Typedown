@@ -70,7 +70,15 @@ const Editor: React.FC = () => {
         OnFileLoaded();
     }), [OnFileLoaded]);
 
-    useEffect(() => transport.addListener<{ text: string, cursor: string, basePath: string }>('SetMarkdown', ({ text, cursor, basePath }) => {
+    // Like LoadFile, but keeps cursor and scroll position (file changed outside of the editor)
+    useEffect(() => transport.addListener<{ text: string, basePath: string }>('ReloadFile', ({ text, basePath }) => {
+        window.basePath = basePath
+        setTimeout(() => setMarkdown(text))
+        markdownRef.current = text
+        OnFileLoaded();
+    }), [OnFileLoaded]);
+
+    useEffect(() => transport.addListener<{ text: string, cursor: string, basePath: string }>('SetMarkdown',({ text, cursor, basePath }) => {
         window.basePath = basePath
         setCursor(cursor)
         setTimeout(() => setMarkdown(text))

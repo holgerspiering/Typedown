@@ -249,4 +249,24 @@
     <value>WebView2-Runtime nicht installiert</value>
     <comment>环境检查对话框/WebView2 运行时未安装</comment>
   </data>
+  <data name="ExternalChangeTitle" xml:space="preserve">
+    <value>Datei wurde außerhalb von Typedown geändert</value>
+    <comment>External change dialog/title</comment>
+  </data>
+  <data name="ExternalChangeContent" xml:space="preserve">
+    <value>„{0}" wurde von einem anderen Programm geändert, im Editor gibt es aber auch ungespeicherte Änderungen. Neu laden verwirft Ihre Änderungen (Strg+Z stellt sie wieder her). Meine Version speichern überschreibt die externen Änderungen.</value>
+    <comment>External change dialog/content, {0} = file name</comment>
+  </data>
+  <data name="Reload" xml:space="preserve">
+    <value>Neu laden</value>
+    <comment>External change dialog/reload from disk</comment>
+  </data>
+  <data name="KeepMine" xml:space="preserve">
+    <value>Meine Version speichern</value>
+    <comment>External change dialog/overwrite file with editor content</comment>
+  </data>
+  <data name="DecideLater" xml:space="preserve">
+    <value>Später entscheiden</value>
+    <comment>External change dialog/close without action</comment>
+  </data>
 </root>

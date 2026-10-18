@@ -406,6 +406,7 @@
     <Compile Include="Services\AccessHistory.cs" />
     <Compile Include="Services\AppDbContext.cs" />
     <Compile Include="Services\AutoBackup.cs" />
+    <Compile Include="Services\FileChangeWatcher.cs" />
     <Compile Include="Services\EventCenter.cs" />
     <Compile Include="Services\ImageAction.cs" />
     <Compile Include="Services\ImageUpload.cs" />

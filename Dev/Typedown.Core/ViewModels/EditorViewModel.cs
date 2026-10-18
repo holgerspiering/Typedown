@@ -49,6 +49,7 @@ namespace Typedown.Core.ViewModels
         public string SearchValue { get; set; } = null;
         public bool FirstStart { get; set; } = true;
         public bool FileLoaded { get; set; }
+        public bool ExternalChangePending { get; set; }
 
         public Command<Unit> UndoCommand { get; } = new();
         public Command<Unit> RedoCommand { get; } = new();
@@ -66,6 +67,8 @@ namespace Typedown.Core.ViewModels
         private readonly CompositeDisposable disposables = new();
 
         private bool contentUpdating = false;
+
+        private bool reloading = false;
 
         public EditorViewModel(IServiceProvider serviceProvider)
         {
@@ -162,7 +165,10 @@ namespace Typedown.Core.ViewModels
                 FileLoaded = true;
                 var newText = arg["text"].ToString();
                 FileHash = Common.SimpleHash(newText);
-                History.InitHistory(newText);
+                if (reloading)
+                    reloading = false;
+                else
+                    History.InitHistory(newText);
                 OnMarkdownChange(newText);
                 if (FloatViewModel.FindReplaceDialogOpen > 0)
                     OnSearch();
@@ -241,6 +247,24 @@ namespace Typedown.Core.ViewModels
             {
                 text = state.Text,
                 cursor = state.Cursor
+            });
+        }
+
+        /// <summary>
+        /// Replaces the editor content with the file content from disk, keeping cursor, scroll position
+        /// and undo history, so Ctrl+Z brings back the previous editor content.
+        /// </summary>
+        public void ReloadContent(string text)
+        {
+            reloading = true;
+            FileLoaded = false;
+            FileHash = Common.SimpleHash(text);
+            OnMarkdownChange(text);
+            contentUpdating = true;
+            MarkdownEditor?.PostMessage("ReloadFile", new
+            {
+                text,
+                basePath = FileViewModel.ImageBasePath
             });
         }
 

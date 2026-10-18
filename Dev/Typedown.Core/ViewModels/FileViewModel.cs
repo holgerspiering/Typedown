@@ -65,6 +65,21 @@ namespace Typedown.Core.ViewModels
 
         private readonly CompositeDisposable disposables = new();
 
+        private FileChangeWatcher fileChangeWatcher;
+
+        // Hash of the file content as last read from or written to disk. Differs from
+        // EditorViewModel.FileHash, which is based on the (normalized) editor content.
+        private ulong diskHash;
+
+        // Disk content hash for which the conflict dialog was already shown, to ask only once per external change
+        private ulong promptedDiskHash;
+
+        private bool checkingExternalChange;
+
+        private bool conflictDialogOpened;
+
+        private bool IsWindowActive => AppViewModel.MainWindow != default && PInvoke.GetForegroundWindow() == AppViewModel.MainWindow;
+
         public FileViewModel(IServiceProvider serviceProvider)
         {
             ServiceProvider = serviceProvider;
@@ -83,6 +98,8 @@ namespace Typedown.Core.ViewModels
             saveFileTimer.Interval = TimeSpan.FromSeconds(5);
             saveFileTimer.Tick += SaveFileTimerTick;
             saveFileTimer.Start();
+            this.WhenPropertyChanged(nameof(FilePath)).Subscribe(_ => RestartFileChangeWatcher());
+            disposables.Add(ServiceProvider.GetService<IWindowService>().WindowIsActivedChanged.Subscribe(OnWindowIsActivedChanged));
             _ = CoreApplication.GetCurrentView().CoreWindow.Dispatcher.RunIdleAsync(() => OnStartup());
         }
 
@@ -131,6 +148,7 @@ namespace Typedown.Core.ViewModels
         {
             if (!await AskToSave()) return;
             FilePath = null;
+            EditorViewModel.ExternalChangePending = false;
             EditorViewModel.FileHash = Common.SimpleHash(Common.DefaultMarkdwn);
             string backup = null;
             if (AppViewModel.GetInstances().Where(x => x != AppViewModel).All(x => !string.IsNullOrEmpty(x.FileViewModel.FilePath)))
@@ -203,6 +221,8 @@ namespace Typedown.Core.ViewModels
                 var text = await File.ReadAllTextAsync(path);
                 EditorViewModel.FirstStart = false;
                 EditorViewModel.FileHash = Common.SimpleHash(text);
+                EditorViewModel.ExternalChangePending = false;
+                diskHash = EditorViewModel.FileHash;
                 FilePath = path;
                 _ = AccessHistory.RecordFileHistory(FilePath);
                 var backup = await CheckBackup(path, EditorViewModel.CurrentHash);
@@ -294,7 +314,7 @@ namespace Typedown.Core.ViewModels
             }
         }
 
-        private async Task<bool> Save(bool alert = true)
+        private async Task<bool> Save(bool alert = true, bool force = false)
         {
             if (FilePath == null)
             {
@@ -303,9 +323,25 @@ namespace Typedown.Core.ViewModels
             }
             else
             {
-                var result = await WriteAllText(FilePath, EditorViewModel.Markdown, alert);
+                // Never silently overwrite a file that was changed by another program
+                if (!force && await ReadDiskHash(FilePath) is ulong currentDiskHash && currentDiskHash != diskHash)
+                {
+                    EditorViewModel.ExternalChangePending = true;
+                    if (alert)
+                        return await ShowConflictDialog();
+                    if (currentDiskHash != promptedDiskHash && IsWindowActive)
+                    {
+                        promptedDiskHash = currentDiskHash;
+                        _ = ShowConflictDialog();
+                    }
+                    return false;
+                }
+                var markdown = EditorViewModel.Markdown;
+                var result = await WriteAllText(FilePath, markdown, alert);
                 if (result)
                 {
+                    diskHash = Common.SimpleHash(markdown);
+                    EditorViewModel.ExternalChangePending = false;
                     EditorViewModel.FileHash = EditorViewModel.CurrentHash;
                     EditorViewModel.Saved = true;
                     AutoBackup.DeleteBackup(FilePath);
@@ -326,10 +362,13 @@ namespace Typedown.Core.ViewModels
                 var file = await filePicker.PickSaveFileAsync();
                 if (file != null)
                 {
-                    var result = await WriteAllText(file.Path, EditorViewModel.Markdown);
+                    var markdown = EditorViewModel.Markdown;
+                    var result = await WriteAllText(file.Path, markdown);
                     if (result)
                     {
                         AutoBackup.DeleteBackup(FilePath);
+                        diskHash = Common.SimpleHash(markdown);
+                        EditorViewModel.ExternalChangePending = false;
                         FilePath = file.Path;
                         EditorViewModel.FileHash = EditorViewModel.CurrentHash;
                         EditorViewModel.Saved = true;
@@ -344,6 +383,162 @@ namespace Typedown.Core.ViewModels
                 await AppContentDialog.Create(Locale.GetString("Error"), ex.Message, Locale.GetString("Ok")).ShowAsync(AppViewModel.XamlRoot);
                 return null;
             }
+        }
+
+        private void RestartFileChangeWatcher()
+        {
+            fileChangeWatcher?.Dispose();
+            fileChangeWatcher = null;
+            if (FilePath == null || disposables.IsDisposed)
+                return;
+            try
+            {
+                fileChangeWatcher = new FileChangeWatcher(FilePath, () => _ = CheckExternalChange());
+            }
+            catch
+            {
+                // Watching not possible (e.g. some network paths), the check on window activation still works
+            }
+        }
+
+        private void OnWindowIsActivedChanged(nint window)
+        {
+            if (window == AppViewModel.MainWindow && IsWindowActive)
+                _ = CheckExternalChange();
+        }
+
+        private async Task CheckExternalChange()
+        {
+            var path = FilePath;
+            if (path == null || checkingExternalChange || disposables.IsDisposed)
+                return;
+            checkingExternalChange = true;
+            try
+            {
+                if (!File.Exists(path))
+                {
+                    // Other editors may save via delete + rename, so wait before treating the file as deleted
+                    await Task.Delay(500);
+                    if (!File.Exists(path) && path == FilePath && diskHash != 0)
+                    {
+                        // Keep the content in the editor and mark it unsaved, saving recreates the file
+                        diskHash = 0;
+                        EditorViewModel.FileHash = 0;
+                        EditorViewModel.Saved = false;
+                    }
+                    return;
+                }
+                var text = await ReadDiskText(path);
+                if (text == null || path != FilePath)
+                    return;
+                var hash = Common.SimpleHash(text);
+                if (hash == diskHash)
+                {
+                    EditorViewModel.ExternalChangePending = false;
+                    return;
+                }
+                if (EditorViewModel.Saved)
+                {
+                    ApplyDiskContent(text, hash);
+                }
+                else
+                {
+                    EditorViewModel.ExternalChangePending = true;
+                    // Ask once per external change and only in the active window, otherwise on next activation
+                    if (hash != promptedDiskHash && IsWindowActive)
+                    {
+                        promptedDiskHash = hash;
+                        _ = ShowConflictDialog();
+                    }
+                }
+            }
+            finally
+            {
+                checkingExternalChange = false;
+            }
+        }
+
+        private void ApplyDiskContent(string text, ulong hash)
+        {
+            diskHash = hash;
+            promptedDiskHash = 0;
+            EditorViewModel.ExternalChangePending = false;
+            EditorViewModel.ReloadContent(text);
+            AutoBackup.DeleteBackup(FilePath);
+        }
+
+        private async Task<bool> ReloadFromDisk()
+        {
+            var text = FilePath == null ? null : await ReadDiskText(FilePath);
+            if (text == null)
+                return false;
+            ApplyDiskContent(text, Common.SimpleHash(text));
+            return true;
+        }
+
+        /// <returns>True if editor and file are in sync afterwards</returns>
+        private async Task<bool> ShowConflictDialog()
+        {
+            if (conflictDialogOpened)
+                return false;
+            conflictDialogOpened = true;
+            ContentDialogResult result;
+            try
+            {
+                result = await AppContentDialog.Create(
+                    Locale.GetDialogString("ExternalChangeTitle"),
+                    string.Format(Locale.GetDialogString("ExternalChangeContent") ?? "{0}", FileName),
+                    Locale.GetDialogString("DecideLater"),
+                    Locale.GetDialogString("Reload"),
+                    Locale.GetDialogString("KeepMine")).ShowAsync(AppViewModel.XamlRoot);
+            }
+            finally
+            {
+                conflictDialogOpened = false;
+            }
+            switch (result)
+            {
+                case ContentDialogResult.Primary:
+                    return await ReloadFromDisk();
+                case ContentDialogResult.Secondary:
+                    return await Save(alert: true, force: true);
+                default:
+                    return false;
+            }
+        }
+
+        private static async Task<string> ReadDiskText(string path)
+        {
+            // The other program may still hold the file open, so retry a few times
+            for (var i = 0; i < 5; i++)
+            {
+                try
+                {
+                    return await File.ReadAllTextAsync(path);
+                }
+                catch (FileNotFoundException)
+                {
+                    return null;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return null;
+                }
+                catch (IOException)
+                {
+                    await Task.Delay(100);
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+            return null;
+        }
+
+        private static async Task<ulong?> ReadDiskHash(string path)
+        {
+            return await ReadDiskText(path) is string text ? Common.SimpleHash(text) : null;
         }
 
         private async Task<bool> PrintHTML(JToken args)
@@ -548,6 +743,7 @@ namespace Typedown.Core.ViewModels
         public void Dispose()
         {
             saveFileTimer.Stop();
+            fileChangeWatcher?.Dispose();
             disposables.Dispose();
         }
 
